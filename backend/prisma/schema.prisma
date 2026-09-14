@@ -1,0 +1,128 @@
+// DhanAdhyaksh Prisma Schema
+// Phase 3: PostgreSQL Database Schema
+// Single-user personal physical-cash tracking application.
+// No User, user_id, or authentication models.
+// All monetary values are strictly integer paise represented as BigInt.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum TransactionType {
+  INCOME
+  EXPENSE
+}
+
+/// Accounts represent physical locations where cash is kept (e.g., Wallet, Room, Bag).
+model Account {
+  id             BigInt   @id @default(autoincrement())
+  name           String   @unique @db.VarChar(100)
+  initialBalance BigInt   @default(0) @map("initial_balance")
+  isActive       Boolean  @default(true) @map("is_active")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  transactions    Transaction[]
+  transfersFrom   Transfer[]       @relation("TransfersFrom")
+  transfersTo     Transfer[]       @relation("TransfersTo")
+  goalAllocations GoalAllocation[]
+
+  @@map("accounts")
+}
+
+/// Categories used for expense tracking (Food, Travel, Shopping, etc.).
+model Category {
+  id        BigInt   @id @default(autoincrement())
+  name      String   @unique @db.VarChar(100)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Relations
+  transactions Transaction[]
+
+  @@map("categories")
+}
+
+/// The financial ledger: records money entering (INCOME) or leaving (EXPENSE) an account.
+model Transaction {
+  id              BigInt          @id @default(autoincrement())
+  accountId       BigInt          @map("account_id")
+  categoryId      BigInt?         @map("category_id")
+  type            TransactionType
+  amount          BigInt
+  source          String?         @db.VarChar(255)
+  note            String?         @db.Text
+  transactionDate DateTime        @map("transaction_date") @db.Date
+  createdAt       DateTime        @default(now()) @map("created_at")
+  updatedAt       DateTime        @updatedAt @map("updated_at")
+
+  // Relations - Restrict prevents accidental cascade loss of financial history
+  account  Account   @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  category Category? @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+
+  @@index([accountId])
+  @@index([transactionDate])
+  @@index([type])
+  @@map("transactions")
+}
+
+/// Physical cash transfers between two physical accounts (total cash invariant).
+model Transfer {
+  id            BigInt   @id @default(autoincrement())
+  fromAccountId BigInt   @map("from_account_id")
+  toAccountId   BigInt   @map("to_account_id")
+  amount        BigInt
+  note          String?  @db.Text
+  transferDate  DateTime @map("transfer_date") @db.Date
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  // Relations - Restrict prevents accidental cascade loss of financial history
+  fromAccount Account @relation("TransfersFrom", fields: [fromAccountId], references: [id], onDelete: Restrict)
+  toAccount   Account @relation("TransfersTo", fields: [toAccountId], references: [id], onDelete: Restrict)
+
+  @@index([fromAccountId])
+  @@index([toAccountId])
+  @@index([transferDate])
+  @@map("transfers")
+}
+
+/// Savings / reservation targets.
+model Goal {
+  id           BigInt    @id @default(autoincrement())
+  name         String    @unique @db.VarChar(100)
+  targetAmount BigInt    @map("target_amount")
+  targetDate   DateTime? @map("target_date") @db.Date
+  isCompleted  Boolean   @default(false) @map("is_completed")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  allocations GoalAllocation[]
+
+  @@map("goals")
+}
+
+/// Money physically reserved in an account for a goal (does not destroy or create cash).
+model GoalAllocation {
+  id        BigInt   @id @default(autoincrement())
+  goalId    BigInt   @map("goal_id")
+  accountId BigInt   @map("account_id")
+  amount    BigInt
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Relations
+  goal    Goal    @relation(fields: [goalId], references: [id], onDelete: Restrict)
+  account Account @relation(fields: [accountId], references: [id], onDelete: Restrict)
+
+  // Prevent duplicate allocations for the same goal and account
+  @@unique([goalId, accountId])
+  @@index([goalId])
+  @@index([accountId])
+  @@map("goal_allocations")
+}
