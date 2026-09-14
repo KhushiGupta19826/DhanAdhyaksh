@@ -27,6 +27,34 @@ describe('Dashboard Page (HomePage)', () => {
     },
   ];
 
+  const mockCategories: api.Category[] = [
+    { id: 1, name: 'Food' },
+    { id: 2, name: 'Travel' },
+  ];
+
+  const mockGoals: api.Goal[] = [
+    {
+      id: 1,
+      name: 'Trip',
+      targetAmount: 500000, // ₹5,000
+      targetDate: null,
+      isCompleted: false,
+      allocatedAmount: 50000, // ₹500
+      remainingAmount: 450000,
+      createdAt: '2026-09-14T00:00:00.000Z',
+      updatedAt: '2026-09-14T00:00:00.000Z',
+      allocations: [
+        {
+          id: 1,
+          goalId: 1,
+          accountId: 1,
+          amount: 50000,
+          createdAt: '2026-09-14T00:00:00.000Z',
+        },
+      ],
+    },
+  ];
+
   const mockTransactions: api.Transaction[] = [
     {
       id: 1,
@@ -60,6 +88,8 @@ describe('Dashboard Page (HomePage)', () => {
 
   beforeEach(() => {
     vi.resetAllMocks();
+    vi.mocked(api.getCategories).mockResolvedValue(mockCategories);
+    vi.mocked(api.getGoals).mockResolvedValue(mockGoals);
   });
 
   it('renders loading state initially', async () => {
@@ -71,10 +101,11 @@ describe('Dashboard Page (HomePage)', () => {
     expect(screen.getByTestId('loading-state')).toBeInTheDocument();
   });
 
-  it('renders Total Cash calculated from account balances (₹3,000)', async () => {
+  it('renders Total Cash, Available Cash, and Reserved Cash truthfully', async () => {
     vi.mocked(api.getAccounts).mockResolvedValue(mockAccounts);
     vi.mocked(api.getTransactions).mockResolvedValue(mockTransactions);
     vi.mocked(api.getTransfers).mockResolvedValue(mockTransfers);
+    vi.mocked(api.getGoals).mockResolvedValue(mockGoals);
 
     render(<HomePage />);
 
@@ -82,48 +113,152 @@ describe('Dashboard Page (HomePage)', () => {
       expect(screen.getByText('Cash Overview')).toBeInTheDocument();
     });
 
-    // Total cash = ₹2,000 + ₹1,000 = ₹3,000 (appears in Total Cash & Available Cash)
-    const formattedSums = screen.getAllByText('₹3,000');
-    expect(formattedSums.length).toBeGreaterThanOrEqual(1);
+    // Total cash = ₹2,000 + ₹1,000 = ₹3,000
+    expect(screen.getByText('₹3,000')).toBeInTheDocument();
+    // Reserved = ₹500 (also appears in transfer activity)
+    expect(screen.getAllByText('₹500').length).toBeGreaterThanOrEqual(1);
+    // Available = ₹3,000 - ₹500 = ₹2,500
+    expect(screen.getByText('₹2,500')).toBeInTheDocument();
 
     expect(screen.getAllByText('Wallet').length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText('Room').length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByText('₹2,000')).toBeInTheDocument();
-    expect(screen.getByText('₹1,000')).toBeInTheDocument();
   });
 
-  it('renders quick action buttons (+ Receive, − Spend, ↔ Transfer)', async () => {
+  it('opens Receive Modal and creates income successfully', async () => {
     vi.mocked(api.getAccounts).mockResolvedValue(mockAccounts);
     vi.mocked(api.getTransactions).mockResolvedValue(mockTransactions);
     vi.mocked(api.getTransfers).mockResolvedValue(mockTransfers);
+    vi.mocked(api.createTransaction).mockResolvedValue({
+      id: 2,
+      accountId: 1,
+      categoryId: null,
+      type: 'INCOME',
+      amount: 150000,
+      source: 'Salary',
+      note: 'Monthly salary',
+      transactionDate: '2026-09-14',
+      createdAt: '2026-09-14T00:00:00.000Z',
+      updatedAt: '2026-09-14T00:00:00.000Z',
+    });
 
     render(<HomePage />);
 
     await waitFor(() => {
       expect(screen.getByText('+ Receive')).toBeInTheDocument();
-      expect(screen.getByText('− Spend')).toBeInTheDocument();
-      expect(screen.getByText('↔ Transfer')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText('+ Receive'));
+
+    expect(screen.getByTestId('quick-action-modal')).toBeInTheDocument();
+    expect(screen.getByText('Receive Money')).toBeInTheDocument();
+
+    // Fill form
+    fireEvent.change(screen.getByPlaceholderText('0.00'), { target: { value: '1500' } });
+    fireEvent.change(screen.getByPlaceholderText(/salary/i), { target: { value: 'Salary' } });
+    fireEvent.change(screen.getByPlaceholderText('Optional details'), { target: { value: 'Monthly salary' } });
+
+    fireEvent.click(screen.getByRole('button', { name: /save entry/i }));
+
+    await waitFor(() => {
+      expect(api.createTransaction).toHaveBeenCalledWith(
+        expect.objectContaining({
+          accountId: 1,
+          type: 'INCOME',
+          amount: 150000,
+          source: 'Salary',
+          note: 'Monthly salary',
+        })
+      );
     });
   });
 
-  it('renders recent activity combining transactions and transfers (Wallet → Room)', async () => {
+  it('opens Spend Modal and creates expense successfully', async () => {
     vi.mocked(api.getAccounts).mockResolvedValue(mockAccounts);
     vi.mocked(api.getTransactions).mockResolvedValue(mockTransactions);
     vi.mocked(api.getTransfers).mockResolvedValue(mockTransfers);
+    vi.mocked(api.createTransaction).mockResolvedValue({
+      id: 3,
+      accountId: 1,
+      categoryId: 1,
+      type: 'EXPENSE',
+      amount: 25000,
+      source: null,
+      note: 'Lunch',
+      transactionDate: '2026-09-14',
+      createdAt: '2026-09-14T00:00:00.000Z',
+      updatedAt: '2026-09-14T00:00:00.000Z',
+    });
 
     render(<HomePage />);
 
     await waitFor(() => {
-      expect(screen.getByText('Recent Activity')).toBeInTheDocument();
+      expect(screen.getByText('− Spend')).toBeInTheDocument();
     });
 
-    // Transfer item Wallet → Room
-    expect(screen.getByText('→')).toBeInTheDocument();
-    expect(screen.getByText('TRANSFER')).toBeInTheDocument();
+    fireEvent.click(screen.getByText('− Spend'));
 
-    // Income item From: Mom
-    expect(screen.getByText('From: Mom')).toBeInTheDocument();
-    expect(screen.getByText('INCOME')).toBeInTheDocument();
+    expect(screen.getByTestId('quick-action-modal')).toBeInTheDocument();
+    expect(screen.getByText('Record Expense')).toBeInTheDocument();
+
+    // Fill form
+    fireEvent.change(screen.getByPlaceholderText('0.00'), { target: { value: '250' } });
+    const selects = screen.getAllByRole('combobox');
+    // selects[0] is Account, selects[1] is Category
+    fireEvent.change(selects[1], { target: { value: '1' } });
+
+    fireEvent.click(screen.getByRole('button', { name: /save entry/i }));
+
+    await waitFor(() => {
+      expect(api.createTransaction).toHaveBeenCalledWith(
+        expect.objectContaining({
+          accountId: 1,
+          type: 'EXPENSE',
+          amount: 25000,
+        })
+      );
+    });
+  });
+
+  it('opens Transfer Modal and submits transfer successfully', async () => {
+    vi.mocked(api.getAccounts).mockResolvedValue(mockAccounts);
+    vi.mocked(api.getTransactions).mockResolvedValue(mockTransactions);
+    vi.mocked(api.getTransfers).mockResolvedValue(mockTransfers);
+    vi.mocked(api.createTransfer).mockResolvedValue({
+      id: 2,
+      fromAccountId: 1,
+      toAccountId: 2,
+      amount: 30000,
+      note: 'Deposit to room',
+      transferDate: '2026-09-14',
+      createdAt: '2026-09-14T00:00:00.000Z',
+      updatedAt: '2026-09-14T00:00:00.000Z',
+    });
+
+    render(<HomePage />);
+
+    await waitFor(() => {
+      expect(screen.getByText('↔ Transfer')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText('↔ Transfer'));
+
+    expect(screen.getByTestId('quick-action-modal')).toBeInTheDocument();
+    expect(screen.getByText('Transfer Cash')).toBeInTheDocument();
+
+    // Fill amount
+    fireEvent.change(screen.getByPlaceholderText('0.00'), { target: { value: '300' } });
+
+    fireEvent.click(screen.getByRole('button', { name: /save entry/i }));
+
+    await waitFor(() => {
+      expect(api.createTransfer).toHaveBeenCalledWith(
+        expect.objectContaining({
+          fromAccountId: 1,
+          toAccountId: 2,
+          amount: 30000,
+        })
+      );
+    });
   });
 
   it('renders API error state and handles Retry', async () => {

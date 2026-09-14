@@ -4,12 +4,23 @@ import { Wallet, ShieldCheck, Lock } from 'lucide-react';
 
 interface TotalCashCardProps {
   totalCashPaise: number;
+  availableCashPaise?: number;
+  reservedCashPaise?: number;
 }
 
-export const TotalCashCard: React.FC<TotalCashCardProps> = ({ totalCashPaise }) => {
+export const TotalCashCard: React.FC<TotalCashCardProps> = ({
+  totalCashPaise,
+  availableCashPaise,
+  reservedCashPaise = 0,
+}) => {
+  const actualAvailable =
+    availableCashPaise !== undefined
+      ? availableCashPaise
+      : totalCashPaise - reservedCashPaise;
+
   const formattedTotal = formatPaiseToRupees(totalCashPaise);
-  const formattedAvailable = formattedTotal;
-  const formattedReserved = formatPaiseToRupees(0);
+  const formattedAvailable = formatPaiseToRupees(actualAvailable);
+  const formattedReserved = formatPaiseToRupees(reservedCashPaise);
 
   return (
     <div className="bg-gradient-to-br from-teal-900 via-teal-800 to-slate-900 text-white rounded-3xl p-5 shadow-lg border border-teal-700/50 space-y-4">

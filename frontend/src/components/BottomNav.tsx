@@ -2,8 +2,8 @@ import React from 'react';
 import { Home, History, Target, MoreHorizontal } from 'lucide-react';
 
 interface BottomNavProps {
-  activeTab?: 'home' | 'history';
-  onTabChange?: (tab: 'home' | 'history') => void;
+  activeTab?: 'home' | 'history' | 'goals';
+  onTabChange?: (tab: 'home' | 'history' | 'goals') => void;
 }
 
 export const BottomNav: React.FC<BottomNavProps> = ({
@@ -40,17 +40,20 @@ export const BottomNav: React.FC<BottomNavProps> = ({
         </button>
 
         <button
-          className="flex flex-col items-center justify-center py-1 text-slate-400 font-medium text-[11px] hover:text-slate-600 transition-colors"
-          disabled
-          aria-label="Goals (Coming soon)"
-          title="Goals coming soon"
+          onClick={() => onTabChange?.('goals')}
+          className={`flex flex-col items-center justify-center py-1 transition-colors ${
+            activeTab === 'goals'
+              ? 'text-teal-700 font-bold'
+              : 'text-slate-400 font-medium hover:text-slate-600'
+          } text-[11px]`}
+          aria-label="Savings Goals"
         >
-          <Target className="w-5 h-5 mb-0.5 opacity-60" />
+          <Target className="w-5 h-5 mb-0.5" />
           <span>Goals</span>
         </button>
 
         <button
-          className="flex flex-col items-center justify-center py-1 text-slate-400 font-medium text-[11px] hover:text-slate-600 transition-colors"
+          className="flex flex-col items-center justify-center py-1 text-slate-400 font-medium text-[11px] hover:text-slate-600 transition-colors cursor-not-allowed"
           disabled
           aria-label="More options (Coming soon)"
           title="More coming soon"
