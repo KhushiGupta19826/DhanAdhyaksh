@@ -10,6 +10,7 @@ export interface AppConfig {
   isTest: boolean;
   corsOrigin: string;
   databaseUrl: string;
+  testDatabaseUrl: string;
 }
 
 export const config: AppConfig = {
@@ -19,4 +20,5 @@ export const config: AppConfig = {
   isTest: process.env.NODE_ENV === 'test',
   corsOrigin: process.env.CORS_ORIGIN || 'http://localhost:5173',
   databaseUrl: process.env.DATABASE_URL || '',
+  testDatabaseUrl: process.env.TEST_DATABASE_URL || '',
 };

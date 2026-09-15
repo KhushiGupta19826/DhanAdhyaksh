@@ -118,6 +118,33 @@ export async function getAccounts(): Promise<Account[]> {
 }
 
 /**
+ * Creates a new account via POST /api/accounts
+ */
+export async function createAccount(data: {
+  name: string;
+  initialBalance?: number;
+}): Promise<Account> {
+  const response = await fetch(`${API_BASE_URL}/accounts`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify(data),
+  });
+
+  const json: ApiResponse<Account> = await response.json();
+
+  if (!response.ok || json.error) {
+    throw new Error(
+      json.error?.message || `Failed to create account (${response.status})`
+    );
+  }
+
+  return json.data;
+}
+
+/**
  * Fetches categories list from GET /api/categories
  */
 export async function getCategories(): Promise<Category[]> {

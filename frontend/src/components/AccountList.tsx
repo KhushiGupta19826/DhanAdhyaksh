@@ -5,9 +5,10 @@ import { Wallet, Folder, Landmark } from 'lucide-react';
 
 interface AccountListProps {
   accounts: Account[];
+  onAddAccountClick?: () => void;
 }
 
-export const AccountList: React.FC<AccountListProps> = ({ accounts }) => {
+export const AccountList: React.FC<AccountListProps> = ({ accounts, onAddAccountClick }) => {
   const getAccountIcon = (name: string) => {
     const lower = name.toLowerCase();
     if (lower.includes('wallet')) return <Wallet className="w-4 h-4 text-teal-700" />;
@@ -21,6 +22,14 @@ export const AccountList: React.FC<AccountListProps> = ({ accounts }) => {
         <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500">
           Cash Accounts ({accounts.length})
         </h3>
+        {onAddAccountClick && (
+          <button
+            onClick={onAddAccountClick}
+            className="text-xs font-semibold text-teal-600 hover:text-teal-700 transition-colors"
+          >
+            + Add Account
+          </button>
+        )}
       </div>
 
       {accounts.length === 0 ? (

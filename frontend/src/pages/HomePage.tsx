@@ -7,6 +7,7 @@ import {
   getGoals,
   createTransaction,
   createTransfer,
+  createAccount,
   Account,
   Transaction,
   Transfer,
@@ -28,14 +29,16 @@ export const HomePage: React.FC = () => {
   const [goals, setGoals] = useState<Goal[]>([]);
 
   const [loading, setLoading] = useState<boolean>(true);
+  const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
   // Quick Action Modal State
-  const [activeModal, setActiveModal] = useState<'INCOME' | 'EXPENSE' | 'TRANSFER' | null>(null);
+  const [activeModal, setActiveModal] = useState<'INCOME' | 'EXPENSE' | 'TRANSFER' | 'CREATE_ACCOUNT' | null>(null);
   const [modalSubmitting, setModalSubmitting] = useState<boolean>(false);
   const [modalError, setModalError] = useState<string | null>(null);
 
   // Form Fields
+  const [accountName, setAccountName] = useState<string>('');
   const [amountRupees, setAmountRupees] = useState<string>('');
   const [accountId, setAccountId] = useState<string>('');
   const [fromAccountId, setFromAccountId] = useState<string>('');
@@ -45,8 +48,12 @@ export const HomePage: React.FC = () => {
   const [date, setDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [note, setNote] = useState<string>('');
 
-  const fetchDashboardData = useCallback(async () => {
-    setLoading(true);
+  const fetchDashboardData = useCallback(async (isBackground = false) => {
+    if (isBackground) {
+      setIsRefreshing(true);
+    } else {
+      setLoading(true);
+    }
     setError(null);
 
     try {
@@ -65,17 +72,23 @@ export const HomePage: React.FC = () => {
       setGoals(gls);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to load dashboard data';
-      setError(msg);
+      if (!isBackground) {
+        setError(msg);
+      } else {
+        alert(`Refresh failed: ${msg}`);
+      }
     } finally {
       setLoading(false);
+      setIsRefreshing(false);
     }
   }, []);
 
   useEffect(() => {
-    fetchDashboardData();
+    fetchDashboardData(false);
   }, [fetchDashboardData]);
 
   const resetForm = () => {
+    setAccountName('');
     setAmountRupees('');
     setSource('');
     setCategoryId('');
@@ -89,7 +102,7 @@ export const HomePage: React.FC = () => {
     }
   };
 
-  const openModal = (type: 'INCOME' | 'EXPENSE' | 'TRANSFER') => {
+  const openModal = (type: 'INCOME' | 'EXPENSE' | 'TRANSFER' | 'CREATE_ACCOUNT') => {
     resetForm();
     if (accounts.length > 0) {
       setAccountId(accounts[0].id.toString());
@@ -110,13 +123,22 @@ export const HomePage: React.FC = () => {
     setModalError(null);
 
     try {
-      const paiseAmount = rupeesToPaise(amountRupees);
-      if (paiseAmount <= 0) {
-        throw new Error('Amount must be greater than zero');
-      }
+      if (activeModal === 'CREATE_ACCOUNT') {
+        if (!accountName.trim()) throw new Error('Account name is required');
+        const initialBalance = amountRupees ? rupeesToPaise(amountRupees) : 0;
+        if (initialBalance < 0) throw new Error('Initial balance cannot be negative');
+        await createAccount({
+          name: accountName.trim(),
+          initialBalance,
+        });
+      } else {
+        const paiseAmount = rupeesToPaise(amountRupees);
+        if (paiseAmount <= 0) {
+          throw new Error('Amount must be greater than zero');
+        }
 
-      if (activeModal === 'INCOME') {
-        if (!accountId) throw new Error('Please select an account');
+        if (activeModal === 'INCOME') {
+          if (!accountId) throw new Error('Please select an account');
         if (!source.trim()) throw new Error('Income source is required');
         await createTransaction({
           accountId: Number(accountId),
@@ -148,9 +170,10 @@ export const HomePage: React.FC = () => {
           transferDate: date,
         });
       }
+      }
 
       closeModal();
-      await fetchDashboardData();
+      await fetchDashboardData(true);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Operation failed';
       setModalError(msg);
@@ -178,13 +201,13 @@ export const HomePage: React.FC = () => {
         </div>
 
         <button
-          onClick={fetchDashboardData}
-          disabled={loading}
+          onClick={() => fetchDashboardData(true)}
+          disabled={loading || isRefreshing}
           className="p-2 text-slate-400 hover:text-teal-700 hover:bg-teal-50 rounded-xl transition-colors disabled:opacity-50"
           aria-label="Refresh Dashboard Data"
           title="Refresh Dashboard"
         >
-          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+          <RefreshCw className={`w-4 h-4 ${loading || isRefreshing ? 'animate-spin' : ''}`} />
         </button>
       </div>
 
@@ -211,7 +234,7 @@ export const HomePage: React.FC = () => {
             </p>
           </div>
           <button
-            onClick={fetchDashboardData}
+            onClick={() => fetchDashboardData(false)}
             className="inline-flex items-center space-x-1.5 px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold rounded-xl shadow transition-colors active:scale-95"
           >
             <RefreshCw className="w-3.5 h-3.5" />
@@ -229,7 +252,7 @@ export const HomePage: React.FC = () => {
           />
 
           {/* 2. Accounts List */}
-          <AccountList accounts={accounts} />
+          <AccountList accounts={accounts} onAddAccountClick={() => openModal('CREATE_ACCOUNT')} />
 
           {/* 3. Quick Actions */}
           <QuickActions onActionClick={openModal} />
@@ -252,8 +275,9 @@ export const HomePage: React.FC = () => {
                 {activeModal === 'INCOME' && <PlusCircle className="w-5 h-5 text-emerald-600" />}
                 {activeModal === 'EXPENSE' && <MinusCircle className="w-5 h-5 text-rose-600" />}
                 {activeModal === 'TRANSFER' && <ArrowLeftRight className="w-5 h-5 text-blue-600" />}
+                {activeModal === 'CREATE_ACCOUNT' && <PlusCircle className="w-5 h-5 text-indigo-600" />}
                 <h3 className="text-sm font-extrabold text-slate-900">
-                  {activeModal === 'INCOME' ? 'Receive Money' : activeModal === 'EXPENSE' ? 'Record Expense' : 'Transfer Cash'}
+                  {activeModal === 'INCOME' ? 'Receive Money' : activeModal === 'EXPENSE' ? 'Record Expense' : activeModal === 'TRANSFER' ? 'Transfer Cash' : 'Add Account'}
                 </h3>
               </div>
               <button
@@ -274,21 +298,39 @@ export const HomePage: React.FC = () => {
 
             {/* Modal Form */}
             <form onSubmit={handleSubmit} className="space-y-3 text-xs">
+              {/* CREATE_ACCOUNT Fields */}
+              {activeModal === 'CREATE_ACCOUNT' && (
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+                    Account Name
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. Almirah, Bag, Room"
+                    value={accountName}
+                    onChange={(e) => setAccountName(e.target.value)}
+                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-500"
+                    autoFocus
+                  />
+                </div>
+              )}
+
               {/* Amount */}
               <div>
                 <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
-                  Amount (₹)
+                  {activeModal === 'CREATE_ACCOUNT' ? 'Initial Balance (₹)' : 'Amount (₹)'}
                 </label>
                 <input
                   type="number"
                   step="any"
-                  min="0.01"
-                  required
+                  min="0"
+                  required={activeModal !== 'CREATE_ACCOUNT'}
                   placeholder="0.00"
                   value={amountRupees}
                   onChange={(e) => setAmountRupees(e.target.value)}
                   className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-500"
-                  autoFocus
+                  autoFocus={activeModal !== 'CREATE_ACCOUNT'}
                 />
               </div>
 
@@ -413,33 +455,37 @@ export const HomePage: React.FC = () => {
                 </>
               )}
 
-              {/* Date */}
-              <div>
-                <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
-                  Date
-                </label>
-                <input
-                  type="date"
-                  required
-                  value={date}
-                  onChange={(e) => setDate(e.target.value)}
-                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-500"
-                />
-              </div>
+              {activeModal !== 'CREATE_ACCOUNT' && (
+                <>
+                  {/* Date */}
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+                      Date
+                    </label>
+                    <input
+                      type="date"
+                      required
+                      value={date}
+                      onChange={(e) => setDate(e.target.value)}
+                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-500"
+                    />
+                  </div>
 
-              {/* Note (Optional) */}
-              <div>
-                <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
-                  Note (Optional)
-                </label>
-                <input
-                  type="text"
-                  placeholder="Optional details"
-                  value={note}
-                  onChange={(e) => setNote(e.target.value)}
-                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-500"
-                />
-              </div>
+                  {/* Note (Optional) */}
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+                      Note (Optional)
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Optional details"
+                      value={note}
+                      onChange={(e) => setNote(e.target.value)}
+                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-500"
+                    />
+                  </div>
+                </>
+              )}
 
               {/* Submit Buttons */}
               <div className="flex items-center justify-end space-x-2 pt-2 border-t border-slate-100">

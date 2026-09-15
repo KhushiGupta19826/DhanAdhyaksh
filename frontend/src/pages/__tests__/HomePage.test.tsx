@@ -286,4 +286,83 @@ describe('Dashboard Page (HomePage)', () => {
       expect(screen.getAllByText('₹3,000').length).toBeGreaterThanOrEqual(1);
     });
   });
+
+  it('opens Add Account Modal and creates account successfully', async () => {
+    vi.mocked(api.getAccounts).mockResolvedValue(mockAccounts);
+    vi.mocked(api.getTransactions).mockResolvedValue(mockTransactions);
+    vi.mocked(api.getTransfers).mockResolvedValue(mockTransfers);
+    vi.mocked(api.createAccount).mockResolvedValue({
+      id: 3,
+      name: 'Almirah',
+      initialBalance: 500000,
+      balance: 500000,
+      isActive: true,
+      createdAt: '2026-09-14T00:00:00.000Z',
+      updatedAt: '2026-09-14T00:00:00.000Z',
+    });
+
+    render(<HomePage />);
+
+    await waitFor(() => {
+      expect(screen.getByText('+ Add Account')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText('+ Add Account'));
+
+    expect(screen.getByTestId('quick-action-modal')).toBeInTheDocument();
+    expect(screen.getByText('Add Account')).toBeInTheDocument();
+
+    // Fill form
+    fireEvent.change(screen.getByPlaceholderText('e.g. Almirah, Bag, Room'), { target: { value: 'Almirah' } });
+    fireEvent.change(screen.getByPlaceholderText('0.00'), { target: { value: '5000' } });
+
+    fireEvent.click(screen.getByRole('button', { name: /save entry/i }));
+
+    await waitFor(() => {
+      expect(api.createAccount).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: 'Almirah',
+          initialBalance: 500000,
+        })
+      );
+    });
+  });
+
+  it('performs background refresh without unmounting dashboard', async () => {
+    vi.mocked(api.getAccounts).mockResolvedValue(mockAccounts);
+    vi.mocked(api.getTransactions).mockResolvedValue(mockTransactions);
+    vi.mocked(api.getTransfers).mockResolvedValue(mockTransfers);
+    
+    // Create an alert spy for the background refresh error test
+    const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {});
+
+    render(<HomePage />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Cash Overview')).toBeInTheDocument();
+    });
+
+    // Dashboard is mounted, skeleton is NOT visible
+    expect(screen.queryByTestId('loading-state')).not.toBeInTheDocument();
+
+    // Setup network error for the background refresh
+    vi.mocked(api.getAccounts).mockRejectedValueOnce(new Error('Background fetch failed'));
+
+    // Trigger background refresh
+    const refreshBtn = screen.getByRole('button', { name: /refresh dashboard/i });
+    fireEvent.click(refreshBtn);
+
+    // Skeleton should still NOT be visible (non-destructive refresh)
+    expect(screen.queryByTestId('loading-state')).not.toBeInTheDocument();
+    
+    // Existing data should still be visible
+    expect(screen.getByText('Cash Overview')).toBeInTheDocument();
+
+    // Verify error was handled via alert (as per Component 3 implementation)
+    await waitFor(() => {
+      expect(alertSpy).toHaveBeenCalledWith(expect.stringContaining('Background fetch failed'));
+    });
+
+    alertSpy.mockRestore();
+  });
 });
