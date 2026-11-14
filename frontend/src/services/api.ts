@@ -1,3 +1,10 @@
+/**
+ * Centralized API service with authentication support.
+ * - Automatically attaches Authorization: Bearer <token> to all protected requests.
+ * - Handles 401 responses by clearing the stored token (session expiry).
+ * - Exposes setAuthToken / clearAuthToken for the AuthContext to call.
+ */
+
 export interface HealthResponse {
   status: string;
   message: string;
@@ -80,16 +87,133 @@ export interface ApiResponse<T> {
   };
 }
 
+export interface LoginResponse {
+  token: string;
+  expiresIn: string;
+}
+
+export interface MeResponse {
+  authenticated: boolean;
+  email: string;
+}
+
+// ── Token management ───────────────────────────────────────────────────────────
+const TOKEN_KEY = 'dha_auth_token';
+
+/** Called by AuthContext after successful login. */
+export function setAuthToken(token: string): void {
+  localStorage.setItem(TOKEN_KEY, token);
+}
+
+/** Called by AuthContext on logout or 401. */
+export function clearAuthToken(): void {
+  localStorage.removeItem(TOKEN_KEY);
+}
+
+/** Reads the stored token (or null if not present). */
+export function getStoredToken(): string | null {
+  return localStorage.getItem(TOKEN_KEY);
+}
+
+// ── Session-expiry callback ────────────────────────────────────────────────────
+// AuthContext registers itself here so the API layer can trigger a logout
+// without a circular import.
+let _onSessionExpired: (() => void) | null = null;
+
+export function registerSessionExpiryHandler(handler: () => void): void {
+  _onSessionExpired = handler;
+}
+
+// ── Core fetch wrapper ─────────────────────────────────────────────────────────
 const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
+
+/** Shared fetch helper that injects auth headers and handles 401. */
+async function apiFetch(
+  path: string,
+  options: RequestInit = {}
+): Promise<Response> {
+  const token = getStoredToken();
+
+  const headers: Record<string, string> = {
+    Accept: 'application/json',
+    ...(options.headers as Record<string, string>),
+  };
+
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    ...options,
+    headers,
+  });
+
+  if (response.status === 401) {
+    clearAuthToken();
+    if (_onSessionExpired) {
+      _onSessionExpired();
+    }
+  }
+
+  return response;
+}
+
+// ── Auth API calls (no auth header needed) ─────────────────────────────────────
+
+/**
+ * POST /api/auth/login — authenticates the owner.
+ * Does NOT use apiFetch to avoid circular token-clearing on deliberate login.
+ */
+export async function loginApi(email: string, password: string): Promise<LoginResponse> {
+  const response = await fetch(`${API_BASE_URL}/auth/login`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify({ email, password }),
+  });
+
+  const json: ApiResponse<LoginResponse> = await response.json();
+
+  if (!response.ok || json.error) {
+    throw new Error(json.error?.message || 'Invalid credentials');
+  }
+
+  return json.data;
+}
+
+/**
+ * POST /api/auth/logout — server-side acknowledgment.
+ */
+export async function logoutApi(): Promise<void> {
+  await apiFetch('/auth/logout', { method: 'POST' });
+  clearAuthToken();
+}
+
+/**
+ * GET /api/auth/me — verifies and restores session on page reload.
+ * Throws if unauthenticated.
+ */
+export async function getMeApi(): Promise<MeResponse> {
+  const response = await apiFetch('/auth/me');
+
+  if (!response.ok) {
+    throw new Error('Not authenticated');
+  }
+
+  const json: ApiResponse<MeResponse> = await response.json();
+  return json.data;
+}
+
+// ── Health ─────────────────────────────────────────────────────────────────────
 
 /**
  * Checks connectivity to the DhanAdhyaksh backend API.
  */
 export async function checkHealth(): Promise<HealthResponse> {
   const response = await fetch(`${API_BASE_URL}/health`, {
-    headers: {
-      Accept: 'application/json',
-    },
+    headers: { Accept: 'application/json' },
   });
 
   if (!response.ok) {
@@ -99,15 +223,10 @@ export async function checkHealth(): Promise<HealthResponse> {
   return response.json();
 }
 
-/**
- * Fetches active accounts list from GET /api/accounts
- */
+// ── Accounts ───────────────────────────────────────────────────────────────────
+
 export async function getAccounts(): Promise<Account[]> {
-  const response = await fetch(`${API_BASE_URL}/accounts`, {
-    headers: {
-      Accept: 'application/json',
-    },
-  });
+  const response = await apiFetch('/accounts');
 
   if (!response.ok) {
     throw new Error(`Failed to fetch accounts (status ${response.status})`);
@@ -117,42 +236,29 @@ export async function getAccounts(): Promise<Account[]> {
   return json.data;
 }
 
-/**
- * Creates a new account via POST /api/accounts
- */
 export async function createAccount(data: {
   name: string;
   initialBalance?: number;
 }): Promise<Account> {
-  const response = await fetch(`${API_BASE_URL}/accounts`, {
+  const response = await apiFetch('/accounts', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-    },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
   });
 
   const json: ApiResponse<Account> = await response.json();
 
   if (!response.ok || json.error) {
-    throw new Error(
-      json.error?.message || `Failed to create account (${response.status})`
-    );
+    throw new Error(json.error?.message || `Failed to create account (${response.status})`);
   }
 
   return json.data;
 }
 
-/**
- * Fetches categories list from GET /api/categories
- */
+// ── Categories ─────────────────────────────────────────────────────────────────
+
 export async function getCategories(): Promise<Category[]> {
-  const response = await fetch(`${API_BASE_URL}/categories`, {
-    headers: {
-      Accept: 'application/json',
-    },
-  });
+  const response = await apiFetch('/categories');
 
   if (!response.ok) {
     throw new Error(`Failed to fetch categories (status ${response.status})`);
@@ -162,9 +268,8 @@ export async function getCategories(): Promise<Category[]> {
   return json.data;
 }
 
-/**
- * Creates a transaction (INCOME or EXPENSE) via POST /api/transactions
- */
+// ── Transactions ───────────────────────────────────────────────────────────────
+
 export async function createTransaction(data: {
   accountId: number;
   type: 'INCOME' | 'EXPENSE';
@@ -174,35 +279,23 @@ export async function createTransaction(data: {
   note?: string | null;
   transactionDate: string;
 }): Promise<Transaction> {
-  const response = await fetch(`${API_BASE_URL}/transactions`, {
+  const response = await apiFetch('/transactions', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-    },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
   });
 
   const json: ApiResponse<Transaction> = await response.json();
 
   if (!response.ok || json.error) {
-    throw new Error(
-      json.error?.message || `Failed to create transaction (${response.status})`
-    );
+    throw new Error(json.error?.message || `Failed to create transaction (${response.status})`);
   }
 
   return json.data;
 }
 
-/**
- * Fetches transactions from GET /api/transactions
- */
 export async function getTransactions(): Promise<Transaction[]> {
-  const response = await fetch(`${API_BASE_URL}/transactions`, {
-    headers: {
-      Accept: 'application/json',
-    },
-  });
+  const response = await apiFetch('/transactions');
 
   if (!response.ok) {
     throw new Error(`Failed to fetch transactions (status ${response.status})`);
@@ -212,9 +305,6 @@ export async function getTransactions(): Promise<Transaction[]> {
   return json.data;
 }
 
-/**
- * Updates a transaction via PATCH /api/transactions/:id
- */
 export async function updateTransaction(
   id: number,
   data: Partial<{
@@ -227,49 +317,35 @@ export async function updateTransaction(
     transactionDate: string;
   }>
 ): Promise<Transaction> {
-  const response = await fetch(`${API_BASE_URL}/transactions/${id}`, {
+  const response = await apiFetch(`/transactions/${id}`, {
     method: 'PATCH',
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-    },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
   });
 
   const json: ApiResponse<Transaction> = await response.json();
 
   if (!response.ok || json.error) {
-    throw new Error(
-      json.error?.message || `Failed to update transaction (${response.status})`
-    );
+    throw new Error(json.error?.message || `Failed to update transaction (${response.status})`);
   }
 
   return json.data;
 }
 
-/**
- * Deletes a transaction via DELETE /api/transactions/:id
- */
 export async function deleteTransaction(id: number): Promise<void> {
-  const response = await fetch(`${API_BASE_URL}/transactions/${id}`, {
+  const response = await apiFetch(`/transactions/${id}`, {
     method: 'DELETE',
-    headers: {
-      Accept: 'application/json',
-    },
   });
 
   const json: ApiResponse<unknown> = await response.json();
 
   if (!response.ok || json.error) {
-    throw new Error(
-      json.error?.message || `Failed to delete transaction (${response.status})`
-    );
+    throw new Error(json.error?.message || `Failed to delete transaction (${response.status})`);
   }
 }
 
-/**
- * Creates a transfer via POST /api/transfers
- */
+// ── Transfers ──────────────────────────────────────────────────────────────────
+
 export async function createTransfer(data: {
   fromAccountId: number;
   toAccountId: number;
@@ -277,35 +353,23 @@ export async function createTransfer(data: {
   note?: string | null;
   transferDate: string;
 }): Promise<Transfer> {
-  const response = await fetch(`${API_BASE_URL}/transfers`, {
+  const response = await apiFetch('/transfers', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-    },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
   });
 
   const json: ApiResponse<Transfer> = await response.json();
 
   if (!response.ok || json.error) {
-    throw new Error(
-      json.error?.message || `Failed to create transfer (${response.status})`
-    );
+    throw new Error(json.error?.message || `Failed to create transfer (${response.status})`);
   }
 
   return json.data;
 }
 
-/**
- * Fetches transfers from GET /api/transfers
- */
 export async function getTransfers(): Promise<Transfer[]> {
-  const response = await fetch(`${API_BASE_URL}/transfers`, {
-    headers: {
-      Accept: 'application/json',
-    },
-  });
+  const response = await apiFetch('/transfers');
 
   if (!response.ok) {
     throw new Error(`Failed to fetch transfers (status ${response.status})`);
@@ -315,9 +379,6 @@ export async function getTransfers(): Promise<Transfer[]> {
   return json.data;
 }
 
-/**
- * Updates a transfer via PATCH /api/transfers/:id
- */
 export async function updateTransfer(
   id: number,
   data: Partial<{
@@ -328,55 +389,37 @@ export async function updateTransfer(
     transferDate: string;
   }>
 ): Promise<Transfer> {
-  const response = await fetch(`${API_BASE_URL}/transfers/${id}`, {
+  const response = await apiFetch(`/transfers/${id}`, {
     method: 'PATCH',
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-    },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
   });
 
   const json: ApiResponse<Transfer> = await response.json();
 
   if (!response.ok || json.error) {
-    throw new Error(
-      json.error?.message || `Failed to update transfer (${response.status})`
-    );
+    throw new Error(json.error?.message || `Failed to update transfer (${response.status})`);
   }
 
   return json.data;
 }
 
-/**
- * Deletes a transfer via DELETE /api/transfers/:id
- */
 export async function deleteTransfer(id: number): Promise<void> {
-  const response = await fetch(`${API_BASE_URL}/transfers/${id}`, {
+  const response = await apiFetch(`/transfers/${id}`, {
     method: 'DELETE',
-    headers: {
-      Accept: 'application/json',
-    },
   });
 
   const json: ApiResponse<unknown> = await response.json();
 
   if (!response.ok || json.error) {
-    throw new Error(
-      json.error?.message || `Failed to delete transfer (${response.status})`
-    );
+    throw new Error(json.error?.message || `Failed to delete transfer (${response.status})`);
   }
 }
 
-/**
- * Fetches goals from GET /api/goals
- */
+// ── Goals ──────────────────────────────────────────────────────────────────────
+
 export async function getGoals(): Promise<Goal[]> {
-  const response = await fetch(`${API_BASE_URL}/goals`, {
-    headers: {
-      Accept: 'application/json',
-    },
-  });
+  const response = await apiFetch('/goals');
 
   if (!response.ok) {
     throw new Error(`Failed to fetch goals (status ${response.status})`);
@@ -386,15 +429,8 @@ export async function getGoals(): Promise<Goal[]> {
   return json.data;
 }
 
-/**
- * Fetches single goal by ID from GET /api/goals/:id
- */
 export async function getGoalById(id: number): Promise<Goal> {
-  const response = await fetch(`${API_BASE_URL}/goals/${id}`, {
-    headers: {
-      Accept: 'application/json',
-    },
-  });
+  const response = await apiFetch(`/goals/${id}`);
 
   if (!response.ok) {
     throw new Error(`Failed to fetch goal (status ${response.status})`);
@@ -404,37 +440,26 @@ export async function getGoalById(id: number): Promise<Goal> {
   return json.data;
 }
 
-/**
- * Creates a new goal via POST /api/goals
- */
 export async function createGoal(data: {
   name: string;
   targetAmount: number;
   targetDate?: string | null;
 }): Promise<Goal> {
-  const response = await fetch(`${API_BASE_URL}/goals`, {
+  const response = await apiFetch('/goals', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-    },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
   });
 
   const json: ApiResponse<Goal> = await response.json();
 
   if (!response.ok || json.error) {
-    throw new Error(
-      json.error?.message || `Failed to create goal (${response.status})`
-    );
+    throw new Error(json.error?.message || `Failed to create goal (${response.status})`);
   }
 
   return json.data;
 }
 
-/**
- * Updates a goal via PATCH /api/goals/:id
- */
 export async function updateGoal(
   id: number,
   data: Partial<{
@@ -444,130 +469,84 @@ export async function updateGoal(
     isCompleted: boolean;
   }>
 ): Promise<Goal> {
-  const response = await fetch(`${API_BASE_URL}/goals/${id}`, {
+  const response = await apiFetch(`/goals/${id}`, {
     method: 'PATCH',
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-    },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
   });
 
   const json: ApiResponse<Goal> = await response.json();
 
   if (!response.ok || json.error) {
-    throw new Error(
-      json.error?.message || `Failed to update goal (${response.status})`
-    );
+    throw new Error(json.error?.message || `Failed to update goal (${response.status})`);
   }
 
   return json.data;
 }
 
-/**
- * Deletes a goal via DELETE /api/goals/:id
- */
 export async function deleteGoal(id: number): Promise<void> {
-  const response = await fetch(`${API_BASE_URL}/goals/${id}`, {
+  const response = await apiFetch(`/goals/${id}`, {
     method: 'DELETE',
-    headers: {
-      Accept: 'application/json',
-    },
   });
 
   const json: ApiResponse<unknown> = await response.json();
 
   if (!response.ok || json.error) {
-    throw new Error(
-      json.error?.message || `Failed to delete goal (${response.status})`
-    );
+    throw new Error(json.error?.message || `Failed to delete goal (${response.status})`);
   }
 }
 
-/**
- * Allocates physical cash from account to goal via POST /api/goals/:id/allocations
- */
 export async function allocateGoal(
   goalId: number,
-  data: {
-    accountId: number;
-    amount: number;
-  }
+  data: { accountId: number; amount: number }
 ): Promise<Goal> {
-  const response = await fetch(`${API_BASE_URL}/goals/${goalId}/allocations`, {
+  const response = await apiFetch(`/goals/${goalId}/allocations`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-    },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
   });
 
   const json: ApiResponse<Goal> = await response.json();
 
   if (!response.ok || json.error) {
-    throw new Error(
-      json.error?.message || `Failed to allocate cash (${response.status})`
-    );
+    throw new Error(json.error?.message || `Failed to allocate cash (${response.status})`);
   }
 
   return json.data;
 }
 
-/**
- * Updates an allocation amount via PATCH /api/goals/:goalId/allocations/:allocationId
- */
 export async function updateGoalAllocation(
   goalId: number,
   allocationId: number,
   data: { amount: number }
 ): Promise<Goal> {
-  const response = await fetch(
-    `${API_BASE_URL}/goals/${goalId}/allocations/${allocationId}`,
-    {
-      method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
-      },
-      body: JSON.stringify(data),
-    }
-  );
+  const response = await apiFetch(`/goals/${goalId}/allocations/${allocationId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
 
   const json: ApiResponse<Goal> = await response.json();
 
   if (!response.ok || json.error) {
-    throw new Error(
-      json.error?.message || `Failed to update allocation (${response.status})`
-    );
+    throw new Error(json.error?.message || `Failed to update allocation (${response.status})`);
   }
 
   return json.data;
 }
 
-/**
- * Deletes a goal allocation via DELETE /api/goals/:goalId/allocations/:allocationId
- */
 export async function deleteGoalAllocation(
   goalId: number,
   allocationId: number
 ): Promise<Goal> {
-  const response = await fetch(
-    `${API_BASE_URL}/goals/${goalId}/allocations/${allocationId}`,
-    {
-      method: 'DELETE',
-      headers: {
-        Accept: 'application/json',
-      },
-    }
-  );
+  const response = await apiFetch(`/goals/${goalId}/allocations/${allocationId}`, {
+    method: 'DELETE',
+  });
 
   const json: ApiResponse<Goal> = await response.json();
 
   if (!response.ok || json.error) {
-    throw new Error(
-      json.error?.message || `Failed to release allocation (${response.status})`
-    );
+    throw new Error(json.error?.message || `Failed to release allocation (${response.status})`);
   }
 
   return json.data;

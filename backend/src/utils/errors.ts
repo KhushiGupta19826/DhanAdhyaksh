@@ -55,3 +55,15 @@ export class InternalServerError extends AppError {
     super(message, 500, 'INTERNAL_ERROR', details);
   }
 }
+
+export class UnauthorizedError extends AppError {
+  constructor(message = 'Authentication required', details?: unknown) {
+    super(message, 401, 'UNAUTHORIZED', details);
+  }
+}
+
+export class TooManyRequestsError extends AppError {
+  constructor(message = 'Too many requests, please try again later', details?: unknown) {
+    super(message, 429, 'TOO_MANY_REQUESTS', details);
+  }
+}

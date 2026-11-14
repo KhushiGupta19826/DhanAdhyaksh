@@ -7,8 +7,10 @@
     "dev": "tsx watch src/server.ts",
     "build": "tsc",
     "start": "node dist/server.js",
-    "test": "vitest run",
-    "test:watch": "vitest",
+    "test": "vitest run --workspace vitest.workspace.ts",
+    "test:watch": "vitest --workspace vitest.workspace.ts",
+    "test:auth": "vitest run --project auth",
+    "test:api": "vitest run --project api",
     "prisma:generate": "prisma generate",
     "db:check": "tsx scripts/checkDb.ts",
     "db:migrate": "prisma migrate deploy",
@@ -26,13 +28,17 @@
   "license": "ISC",
   "dependencies": {
     "@prisma/client": "^6.4.1",
+    "bcryptjs": "^3.0.3",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
-    "express": "^4.21.2"
+    "express": "^4.21.2",
+    "jsonwebtoken": "^9.0.3"
   },
   "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.0",
+    "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^22.13.5",
     "@types/supertest": "^6.0.2",
     "prisma": "^6.4.1",

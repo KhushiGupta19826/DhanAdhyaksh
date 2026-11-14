@@ -20,6 +20,15 @@ describe('Application Root & Navigation (App)', () => {
 
   beforeEach(() => {
     vi.resetAllMocks();
+
+    // Simulate an already-authenticated session so the app renders normally
+    vi.mocked(api.getStoredToken).mockReturnValue('valid-test-token');
+    vi.mocked(api.getMeApi).mockResolvedValue({ authenticated: true, email: 'owner@test.com' });
+    vi.mocked(api.registerSessionExpiryHandler).mockImplementation(() => {});
+    vi.mocked(api.setAuthToken).mockImplementation(() => {});
+    vi.mocked(api.clearAuthToken).mockImplementation(() => {});
+
+    // Financial data
     vi.mocked(api.getAccounts).mockResolvedValue(mockAccounts);
     vi.mocked(api.getTransactions).mockResolvedValue([]);
     vi.mocked(api.getTransfers).mockResolvedValue([]);
@@ -30,7 +39,10 @@ describe('Application Root & Navigation (App)', () => {
   it('renders Header and default Home dashboard', async () => {
     render(<App />);
 
-    expect(screen.getByText('DhanAdhyaksh')).toBeInTheDocument();
+    // Wait for auth check + dashboard to load
+    await waitFor(() => {
+      expect(screen.getByText('DhanAdhyaksh')).toBeInTheDocument();
+    });
     expect(screen.getByText('Physical Cash Tracker')).toBeInTheDocument();
 
     await waitFor(() => {

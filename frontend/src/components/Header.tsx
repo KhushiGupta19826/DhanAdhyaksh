@@ -1,7 +1,14 @@
 import React from 'react';
-import { Wallet } from 'lucide-react';
+import { Wallet, LogOut } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
 
 export const Header: React.FC = () => {
+  const { logout } = useAuth();
+
+  const handleLogout = async () => {
+    await logout();
+  };
+
   return (
     <header className="w-full bg-white border-b border-slate-200/80 px-4 py-3 sticky top-0 z-10">
       <div className="max-w-md mx-auto flex items-center justify-between">
@@ -23,6 +30,18 @@ export const Header: React.FC = () => {
           <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-teal-50 text-teal-700 border border-teal-200/60">
             Dashboard
           </span>
+          <button
+            onClick={handleLogout}
+            title="Sign out"
+            aria-label="Sign out"
+            className="
+              ml-1 p-1.5 rounded-lg text-slate-400
+              hover:text-slate-600 hover:bg-slate-100
+              transition-colors duration-150
+            "
+          >
+            <LogOut className="w-4 h-4" />
+          </button>
         </div>
       </div>
     </header>
